@@ -26,6 +26,7 @@ Features & Commands
         /setinterval - Set how often random messages should be sent (in hours)
         /setchannel - Add a channel where random messages will be sent
         /removechannel - Remove a channel from the random message list
+  
   Scheduled Messages
         /schedulemessage - Schedule a specific message to be sent at a future date and time
         /listscheduled - View all scheduled messages
