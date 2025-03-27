@@ -69,3 +69,23 @@ The bot stores its configuration in a config.json file, which is automatically c
 
 Permissions
 Only users designated as admins can configure the bot. The initial admin is set via the PERMANENT_ADMIN_IDS environment variable.
+
+
+SHOWCASING IMAGES:
+
+<img width="295" alt="image" src="https://github.com/user-attachments/assets/43b53767-6fdc-426e-b831-fdf36f717f1d" />
+
+
+<img width="418" alt="image" src="https://github.com/user-attachments/assets/5938f906-a751-4f62-9078-2cbfb0fbd75c" />
+
+<img width="779" alt="image" src="https://github.com/user-attachments/assets/51cc5578-8e81-4797-83ba-5a0b73a94018" />
+
+<img width="789" alt="image" src="https://github.com/user-attachments/assets/964ec7f3-a118-4f07-91b3-60e4d740b563" />
+
+<img width="786" alt="image" src="https://github.com/user-attachments/assets/35cc7199-a2ae-4fa5-8fc8-0b2a649f6344" />
+
+<img width="669" alt="image" src="https://github.com/user-attachments/assets/7e6fa5a6-e963-47d3-a705-9ad10836b3bf" />
+
+
+
+
