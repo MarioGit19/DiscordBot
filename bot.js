@@ -25,8 +25,14 @@ const client = new Client({
   ],
 });
 
-// Instead, use this:
+// Use environment variables instead of hardcoded values
 const token = process.env.DISCORD_TOKEN;
+const guildId = process.env.GUILD_ID;
+
+// For arrays, split the string by commas
+const PERMANENT_ADMINS = process.env.PERMANENT_ADMIN_IDS?.split(",") || [
+  "447910254114766848",
+];
 
 // Path to configuration file
 const CONFIG_PATH = path.join(__dirname, "config.json");
@@ -699,9 +705,6 @@ function startRandomMessageTimer() {
   // Send a message right away
   sendRandomMessage();
 }
-
-// Add a list of permanent admins that cannot be removed
-const PERMANENT_ADMINS = ["447910254114766848"]; // Your ID is permanent
 
 // Function to check if a user has admin permissions
 function isAdmin(userId) {
