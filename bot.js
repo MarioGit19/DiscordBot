@@ -54,6 +54,8 @@ let config = {
   messageInterval: 3 * 60 * 60 * 1000, // 3 hours in milliseconds
   adminUsers: ["447910254114766848"], // DEFAULT ADMIN: Your ID is added by default
   scheduledMessages: [], // NEW: Array to store scheduled messages
+  activeMessageIndex: null,
+  activeMessageInterval: null,
 };
 
 // Load configuration if exists
@@ -74,6 +76,19 @@ function saveConfig() {
   } catch (error) {
     console.error("Error saving configuration:", error);
   }
+}
+
+// Helper function to format messages with line breaks
+function formatMessage(message) {
+  if (!message) return message;
+
+  // Replace \n with actual line breaks
+  let formatted = message.replace(/\\n/g, "\n");
+
+  // Also replace {br} with line breaks (alternative notation)
+  formatted = formatted.replace(/{br}/gi, "\n");
+
+  return formatted;
 }
 
 // Function to register commands to a specific guild (server) - faster for testing
@@ -156,6 +171,13 @@ async function registerGuildCommands(guildId) {
           type: 10, // NUMBER type
           required: true,
         },
+        {
+          name: "message_index",
+          description:
+            "Index of a specific message to set interval for (leave empty for all messages)",
+          type: 4, // INTEGER type
+          required: false,
+        },
       ],
     },
     {
@@ -234,9 +256,16 @@ async function registerGuildCommands(guildId) {
       options: [
         {
           name: "message",
-          description: "The message to send",
+          description: "The message to send (can include line breaks)",
           type: 3, // STRING type
-          required: true,
+          required: false,
+        },
+        {
+          name: "message_index",
+          description:
+            "Index of a message from the pool to send (use /listmessages to see indices)",
+          type: 4, // INTEGER type
+          required: false,
         },
         {
           name: "channel",
@@ -328,6 +357,10 @@ async function registerGuildCommands(guildId) {
           ],
         },
       ],
+    },
+    {
+      name: "clearinterval",
+      description: "Clear the current scheduled message interval",
     },
   ];
 
@@ -347,339 +380,36 @@ async function registerGuildCommands(guildId) {
   }
 }
 
-// When the bot is ready
-client.once("ready", async () => {
-  console.log(`Bot is online as ${client.user.tag}!`);
+// Store the active message timer
+let activeMessageTimer = null;
+let activeMessageIndex = null;
 
-  // Make sure the permanent admin is always in the admin list
-  if (!config.adminUsers) {
-    config.adminUsers = [];
-  }
-
-  // Add permanent admins if they're not already in the list
-  for (const adminId of config.adminUsers) {
-    if (!config.adminUsers.includes(adminId)) {
-      config.adminUsers.push(adminId);
-      console.log(`Added permanent admin ${adminId} to admin list`);
-    }
-  }
-
-  // Save the config if any changes were made
-  saveConfig();
-
-  // Register commands globally (takes up to an hour)
-  const rest = new REST({ version: "10" }).setToken(token);
-
-  const commandData = [
-    {
-      name: "setreactions",
-      description: "Set reactions for a specific user",
-      options: [
-        {
-          name: "user",
-          description: "The user to set reactions for",
-          type: 6, // USER type
-          required: true,
-        },
-        {
-          name: "reactions",
-          description: "Space-separated emojis to react with",
-          type: 3, // STRING type
-          required: true,
-        },
-      ],
-    },
-    {
-      name: "listreactions",
-      description: "List all users and their configured reactions",
-    },
-    {
-      name: "clearreactions",
-      description: "Remove all reactions for a user",
-      options: [
-        {
-          name: "user",
-          description: "The user to clear reactions for",
-          type: 6, // USER type
-          required: true,
-        },
-      ],
-    },
-    {
-      name: "settings",
-      description: "View current bot settings",
-    },
-    {
-      name: "addmessage",
-      description: "Add a message to the random message pool",
-      options: [
-        {
-          name: "message",
-          description: "The message to add",
-          type: 3, // STRING type
-          required: true,
-        },
-      ],
-    },
-    {
-      name: "removemessage",
-      description: "Remove a message from the pool by index",
-      options: [
-        {
-          name: "index",
-          description:
-            "The index of the message to remove (use /listmessages to see indices)",
-          type: 4, // INTEGER type
-          required: true,
-        },
-      ],
-    },
-    {
-      name: "listmessages",
-      description: "List all messages in the pool with their indices",
-    },
-    {
-      name: "setinterval",
-      description: "Set the interval for random messages (in hours)",
-      options: [
-        {
-          name: "hours",
-          description: "Hours between messages",
-          type: 10, // NUMBER type
-          required: true,
-        },
-      ],
-    },
-    {
-      name: "setchannel",
-      description: "Set a channel for random messages",
-      options: [
-        {
-          name: "channel",
-          description: "The channel to send messages in",
-          type: 7, // CHANNEL type
-          required: true,
-        },
-      ],
-    },
-    {
-      name: "removechannel",
-      description: "Remove a channel from the random message list",
-      options: [
-        {
-          name: "channel",
-          description: "The channel to remove",
-          type: 7, // CHANNEL type
-          required: true,
-        },
-      ],
-    },
-    {
-      name: "addadmin",
-      description: "Add a user as an admin who can use bot commands",
-      options: [
-        {
-          name: "user",
-          description: "The user to add as admin",
-          type: 6, // USER type
-          required: true,
-        },
-      ],
-    },
-    {
-      name: "removeadmin",
-      description: "Remove a user from the admin list",
-      options: [
-        {
-          name: "user",
-          description: "The user to remove from admins",
-          type: 6, // USER type
-          required: true,
-        },
-      ],
-    },
-    {
-      name: "listadmins",
-      description: "List all users who have admin permissions",
-    },
-    {
-      name: "addreaction",
-      description: "Add a reaction to a user's existing reactions",
-      options: [
-        {
-          name: "user",
-          description: "The user to add reactions for",
-          type: 6, // USER type
-          required: true,
-        },
-        {
-          name: "reaction",
-          description: "The emoji to add",
-          type: 3, // STRING type
-          required: true,
-        },
-      ],
-    },
-    {
-      name: "sendnow",
-      description: "Send a message to a channel immediately",
-      options: [
-        {
-          name: "message",
-          description: "The message to send",
-          type: 3, // STRING type
-          required: true,
-        },
-        {
-          name: "channel",
-          description:
-            "The channel to send the message to (defaults to current channel)",
-          type: 7, // CHANNEL type
-          required: false,
-        },
-      ],
-    },
-    {
-      name: "schedulemessage",
-      description:
-        "Schedule a message to be sent at a specific time (CET/GMT+1)",
-      options: [
-        {
-          name: "message",
-          description: "The message to send",
-          type: 3, // STRING type
-          required: true,
-        },
-        {
-          name: "date",
-          description: "Date (DD-MM-YYYY)",
-          type: 3, // STRING type
-          required: true,
-        },
-        {
-          name: "time",
-          description: "Time in 24h format (HH:MM) in CET/GMT+1",
-          type: 3, // STRING type
-          required: true,
-        },
-        {
-          name: "channel",
-          description:
-            "The channel to send the message to (defaults to current channel)",
-          type: 7, // CHANNEL type
-          required: false,
-        },
-      ],
-    },
-    {
-      name: "listscheduled",
-      description: "List all scheduled messages",
-    },
-    {
-      name: "cancelscheduled",
-      description: "Cancel a scheduled message by its ID",
-      options: [
-        {
-          name: "id",
-          description: "ID of the scheduled message to cancel",
-          type: 3, // STRING type
-          required: true,
-        },
-      ],
-    },
-    {
-      name: "armory",
-      description: "Look up a character on Warmane's Icecrown server",
-      options: [
-        {
-          name: "character",
-          description: "Character name to look up",
-          type: 3, // STRING type
-          required: true,
-        },
-      ],
-    },
-    {
-      name: "guild",
-      description: "Look up a guild on Warmane's Icecrown server",
-      options: [
-        {
-          name: "name",
-          description: "Guild name to look up",
-          type: 3, // STRING type
-          required: true,
-        },
-        {
-          name: "filter",
-          description: "Filter results (online/all)",
-          type: 3, // STRING type
-          required: false,
-          choices: [
-            { name: "Online Only", value: "online" },
-            { name: "All Members", value: "all" },
-          ],
-        },
-      ],
-    },
-  ];
-
-  try {
-    console.log("Started refreshing global application commands");
-
-    // Register commands globally
-    await rest.put(Routes.applicationCommands(client.user.id), {
-      body: commandData,
-    });
-
-    console.log(
-      "Successfully registered global commands (may take up to an hour to appear)"
-    );
-
-    // Get all guilds the bot is in and register commands to each one
-    // This is faster for testing as guild commands update instantly
-    client.guilds.cache.forEach((guild) => {
-      registerGuildCommands(guild.id);
-    });
-
-    // Start the random message timer if channels are configured
-    if (config.messageChannels && config.messageChannels.length > 0) {
-      startRandomMessageTimer();
-    }
-
-    // Start checking for scheduled messages every minute
-    setInterval(checkScheduledMessages, 60000);
-    console.log("Scheduled message checker started");
-  } catch (error) {
-    console.error("Error registering global commands:", error);
-  }
-});
-
-// Variable to store the message timer
-let messageTimer = null;
-
-// Function to send a random message
-async function sendRandomMessage() {
+// Function to send the active message
+async function sendActiveMessage() {
   if (
+    activeMessageIndex === null ||
     !config.messages ||
-    config.messages.length === 0 ||
+    !config.messages[activeMessageIndex] ||
     !config.messageChannels ||
     config.messageChannels.length === 0
   ) {
-    console.log("No messages or channels configured for random messages");
+    console.log("No active message or channels configured");
     return;
   }
 
-  // Get a random message
-  const randomMessage =
-    config.messages[Math.floor(Math.random() * config.messages.length)];
+  const message = formatMessage(config.messages[activeMessageIndex]);
 
   // Send to each configured channel
   for (const channelId of config.messageChannels) {
     try {
       const channel = await client.channels.fetch(channelId);
       if (channel && channel.isTextBased()) {
-        await channel.send(randomMessage);
-        console.log(`Sent random message to ${channel.name}: ${randomMessage}`);
+        await channel.send(message);
+        console.log(
+          `Sent scheduled message #${activeMessageIndex + 1} to ${
+            channel.name
+          }: ${message}`
+        );
       }
     } catch (error) {
       console.error(`Error sending message to channel ${channelId}:`, error);
@@ -687,23 +417,38 @@ async function sendRandomMessage() {
   }
 }
 
-// Function to start the random message timer
-function startRandomMessageTimer() {
+// Function to start the message timer
+function startMessageTimer() {
   // Clear any existing timer
-  if (messageTimer) {
-    clearInterval(messageTimer);
+  stopMessageTimer();
+
+  if (activeMessageIndex === null || !config.activeMessageInterval) {
+    console.log("No active message or interval configured");
+    return;
   }
 
   // Start a new timer
-  messageTimer = setInterval(sendRandomMessage, config.messageInterval);
   console.log(
-    `Started random message timer with interval of ${
-      config.messageInterval / (60 * 60 * 1000)
+    `Starting timer for message #${activeMessageIndex + 1} with interval ${
+      config.activeMessageInterval / (60 * 60 * 1000)
     } hours`
   );
+  activeMessageTimer = setInterval(
+    sendActiveMessage,
+    config.activeMessageInterval
+  );
 
-  // Send a message right away
-  sendRandomMessage();
+  // Send immediately on startup
+  sendActiveMessage();
+}
+
+// Function to stop the message timer
+function stopMessageTimer() {
+  if (activeMessageTimer) {
+    clearInterval(activeMessageTimer);
+    activeMessageTimer = null;
+    console.log("Message timer stopped");
+  }
 }
 
 // Function to check if a user has admin permissions
@@ -942,14 +687,24 @@ client.on("interactionCreate", async (interaction) => {
         let messageCount = (config.messages || []).length;
         let channelCount = (config.messageChannels || []).length;
 
+        let activeMessageInfo = "No active scheduled message";
+        if (
+          config.activeMessageIndex !== undefined &&
+          config.activeMessageIndex !== null
+        ) {
+          const messageText = config.messages[config.activeMessageIndex];
+          const intervalHours = config.activeMessageInterval / (60 * 60 * 1000);
+          activeMessageInfo = `Message #${
+            config.activeMessageIndex + 1
+          }: "${messageText}" (every ${intervalHours} hours)`;
+        }
+
         const settingsInfo = [
           `**Current Bot Settings**`,
           `**Users with configured reactions:** ${userCount}`,
           `**Messages in pool:** ${messageCount}`,
           `**Message channels:** ${channelCount}`,
-          `**Message interval:** ${
-            config.messageInterval / (60 * 60 * 1000)
-          } hours`,
+          `**Active scheduled message:** ${activeMessageInfo}`,
         ].join("\n");
 
         await interaction.reply({
@@ -960,10 +715,16 @@ client.on("interactionCreate", async (interaction) => {
 
       case "addmessage":
         const newMessage = interaction.options.getString("message");
+
+        // Add the raw message to the config (line breaks will be processed when sending)
         config.messages.push(newMessage);
         saveConfig();
+
+        // Show a formatted preview
+        const formattedPreview = formatMessage(newMessage);
+
         await interaction.reply({
-          content: `Added new message: "${newMessage}"`,
+          content: `Added new message:\n"${formattedPreview}"\n\nNote: Use \\n or {br} in your message to create line breaks.`,
           ephemeral: true,
         });
         break;
@@ -1007,18 +768,62 @@ client.on("interactionCreate", async (interaction) => {
 
       case "setinterval":
         const hours = interaction.options.getNumber("hours");
-        config.messageInterval = hours * 60 * 60 * 1000; // Convert hours to milliseconds
-        saveConfig();
+        const intervalMsgIndex =
+          interaction.options.getInteger("message_index");
 
-        // Restart the timer with the new interval
-        if (config.messageChannels && config.messageChannels.length > 0) {
-          startRandomMessageTimer();
+        if (intervalMsgIndex === null) {
+          await interaction.reply({
+            content: "Please specify a message_index to schedule.",
+            ephemeral: true,
+          });
+          return;
         }
 
-        await interaction.reply({
-          content: `Set message interval to ${hours} hours`,
-          ephemeral: true,
-        });
+        const actualMsgIndex = intervalMsgIndex - 1; // Convert from 1-based to 0-based
+
+        if (actualMsgIndex < 0 || actualMsgIndex >= config.messages.length) {
+          await interaction.reply({
+            content: `Invalid message index. Use /listmessages to see valid indices (1-${config.messages.length}).`,
+            ephemeral: true,
+          });
+          return;
+        }
+
+        // If hours is 0, stop the timer
+        if (hours <= 0) {
+          config.activeMessageIndex = null;
+          config.activeMessageInterval = null;
+          stopMessageTimer();
+          activeMessageIndex = null;
+          saveConfig();
+
+          await interaction.reply({
+            content: "Stopped the scheduled message timer.",
+            ephemeral: true,
+          });
+          return;
+        }
+
+        // Store the new active message and interval
+        const milliseconds = hours * 60 * 60 * 1000; // Convert hours to milliseconds
+        config.activeMessageIndex = actualMsgIndex;
+        config.activeMessageInterval = milliseconds;
+        activeMessageIndex = actualMsgIndex;
+        saveConfig();
+
+        // Start or restart the timer
+        if (config.messageChannels && config.messageChannels.length > 0) {
+          startMessageTimer();
+          await interaction.reply({
+            content: `Now sending message "${config.messages[actualMsgIndex]}" every ${hours} hours. The message has been sent now and will repeat at the set interval.`,
+            ephemeral: true,
+          });
+        } else {
+          await interaction.reply({
+            content: `Set message "${config.messages[actualMsgIndex]}" to send every ${hours} hours, but no channels are configured. Use /setchannel to add a channel.`,
+            ephemeral: true,
+          });
+        }
         break;
 
       case "setchannel":
@@ -1040,9 +845,14 @@ client.on("interactionCreate", async (interaction) => {
           config.messageChannels.push(channel.id);
           saveConfig();
 
-          // Start the timer if this is the first channel
-          if (config.messageChannels.length === 1) {
-            startRandomMessageTimer();
+          // Start the timer if this is the first channel and we have an active message
+          if (
+            config.messageChannels.length === 1 &&
+            config.activeMessageIndex !== undefined &&
+            config.activeMessageInterval
+          ) {
+            activeMessageIndex = config.activeMessageIndex;
+            startMessageTimer();
           }
 
           await interaction.reply({
@@ -1073,11 +883,9 @@ client.on("interactionCreate", async (interaction) => {
           config.messageChannels.splice(channelIndex, 1);
           saveConfig();
 
-          // Stop the timer if no channels left
-          if (config.messageChannels.length === 0 && messageTimer) {
-            clearInterval(messageTimer);
-            messageTimer = null;
-            console.log("Random message timer stopped (no channels left)");
+          // Stop timer if no channels left
+          if (config.messageChannels.length === 0) {
+            stopMessageTimer();
           }
 
           await interaction.reply({
@@ -1130,8 +938,18 @@ client.on("interactionCreate", async (interaction) => {
 
       case "sendnow":
         const messageToSend = interaction.options.getString("message");
+        const sendNowMsgIndex = interaction.options.getInteger("message_index");
         const targetChannel =
           interaction.options.getChannel("channel") || interaction.channel;
+
+        // Check if at least one of message or message_index is provided
+        if (!messageToSend && sendNowMsgIndex === null) {
+          await interaction.reply({
+            content: "You must provide either a message or a message index.",
+            ephemeral: true,
+          });
+          return;
+        }
 
         if (!targetChannel.isTextBased()) {
           await interaction.reply({
@@ -1141,11 +959,49 @@ client.on("interactionCreate", async (interaction) => {
           return;
         }
 
+        let finalMessage = messageToSend;
+
+        // If message_index is provided, use that message from the pool
+        if (sendNowMsgIndex !== null) {
+          const actualIndex = sendNowMsgIndex - 1; // Convert from 1-based to 0-based
+          if (actualIndex < 0 || actualIndex >= config.messages.length) {
+            await interaction.reply({
+              content: `Invalid message index. Use /listmessages to see valid indices (1-${config.messages.length}).`,
+              ephemeral: true,
+            });
+            return;
+          }
+
+          finalMessage = config.messages[actualIndex];
+
+          // Ensure the message is not empty
+          if (!finalMessage || finalMessage.trim() === "") {
+            await interaction.reply({
+              content: `Error: Message at index ${sendNowMsgIndex} is empty. Please check your messages.`,
+              ephemeral: true,
+            });
+            return;
+          }
+        }
+
+        // Ensure the final message is not empty before sending
+        if (!finalMessage || finalMessage.trim() === "") {
+          await interaction.reply({
+            content:
+              "Cannot send an empty message. Please provide a valid message.",
+            ephemeral: true,
+          });
+          return;
+        }
+
+        // Format the message to handle line breaks
+        finalMessage = formatMessage(finalMessage);
+
         try {
-          await targetChannel.send(messageToSend);
+          await targetChannel.send(finalMessage);
 
           await interaction.reply({
-            content: `Message sent to ${targetChannel.name}:\n"${messageToSend}"`,
+            content: `Message sent to ${targetChannel.name}:\n"${finalMessage}"`,
             ephemeral: true,
           });
         } catch (error) {
@@ -1225,7 +1081,7 @@ client.on("interactionCreate", async (interaction) => {
         // Create the scheduled message object
         const scheduledMessage = {
           id: msgId,
-          message: msgToSchedule,
+          message: msgToSchedule, // Store raw message, will be formatted when sending
           channelId: targetChan.id,
           timestamp: scheduledDate.toISOString(),
           createdBy: interaction.user.id,
@@ -1568,6 +1424,41 @@ client.on("interactionCreate", async (interaction) => {
           });
         }
         break;
+
+      case "clearinterval":
+        // Check if there's an active interval
+        if (
+          config.activeMessageIndex === null ||
+          config.activeMessageIndex === undefined
+        ) {
+          await interaction.reply({
+            content: "There is no active scheduled message to clear.",
+            ephemeral: true,
+          });
+          return;
+        }
+
+        // Get info about the message being cleared for feedback
+        const messageBeingCleared = config.messages[config.activeMessageIndex];
+        const intervalBeingCleared =
+          config.activeMessageInterval / (60 * 60 * 1000); // Convert to hours
+
+        // Clear the active message settings
+        config.activeMessageIndex = null;
+        config.activeMessageInterval = null;
+
+        // Stop the timer
+        stopMessageTimer();
+        activeMessageIndex = null;
+
+        // Save the changes
+        saveConfig();
+
+        await interaction.reply({
+          content: `Cleared scheduled message: "${messageBeingCleared}" that was set to send every ${intervalBeingCleared} hours.`,
+          ephemeral: true,
+        });
+        break;
     }
   } catch (error) {
     console.error(`Error handling command ${commandName}:`, error);
@@ -1637,8 +1528,11 @@ function checkScheduledMessages() {
       try {
         const channel = client.channels.cache.get(scheduledMsg.channelId);
         if (channel && channel.isTextBased()) {
+          // Format the message before sending
+          const formattedMessage = formatMessage(scheduledMsg.message);
+
           channel
-            .send(scheduledMsg.message)
+            .send(formattedMessage)
             .then(() =>
               console.log(`Sent scheduled message: ${scheduledMsg.id}`)
             )
@@ -1858,6 +1752,49 @@ setInterval(() => {
     });
   }
 }, 5 * 60 * 1000); // Check every 5 minutes
+
+// When the bot is ready
+client.once("ready", async () => {
+  console.log(`Logged in as ${client.user.tag}`);
+
+  // Register commands globally
+  const rest = new REST({ version: "10" }).setToken(token);
+
+  const commandData = [
+    // ... existing commands ...
+
+    // Make sure this is included in the global commands too
+    {
+      name: "clearinterval",
+      description: "Clear the current scheduled message interval",
+    },
+
+    // ... existing commands ...
+  ];
+
+  try {
+    console.log("Started refreshing global application commands");
+
+    // Register commands globally
+    await rest.put(Routes.applicationCommands(client.user.id), {
+      body: commandData,
+    });
+
+    console.log(
+      "Successfully registered global commands (may take up to an hour to appear)"
+    );
+
+    // Get all guilds the bot is in and register commands to each one
+    // This is faster for testing as guild commands update instantly
+    client.guilds.cache.forEach((guild) => {
+      registerGuildCommands(guild.id);
+    });
+
+    // ... existing code ...
+  } catch (error) {
+    console.error("Error registering global commands:", error);
+  }
+});
 
 // Log in to Discord with your client's token
 client.login(token);

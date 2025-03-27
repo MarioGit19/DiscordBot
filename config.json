@@ -20,7 +20,7 @@
     "Send Feet pics."
   ],
   "messageChannels": [
-    "888442971492610091"
+    "1354880711248580628"
   ],
   "messageInterval": 1800000,
   "userReactions": {
@@ -33,5 +33,10 @@
     "932923258326614087",
     "762043413850750987"
   ],
-  "scheduledMessages": []
+  "scheduledMessages": [],
+  "messageIntervals": {
+    "1": 7199.999999999999
+  },
+  "activeMessageIndex": 1,
+  "activeMessageInterval": 4442400000
 }
