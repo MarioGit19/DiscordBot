@@ -41,14 +41,8 @@ const CONFIG_PATH = path.join(__dirname, "config.json");
 let config = {
   userReactions: {}, // Map of user IDs to their specific reactions
   messages: [
-    "There's a ginger lad in here, whom I'd love to shag!",
-    "Yasen should be perma muted",
-    "Send Feet pics",
-    "Carl is the most magnificent ginger leprechaun in the world.",
-    "Foot Fetishers unite!",
-    "Seyo stop eating please.",
-    "Anyone wants to get his toes sucked?",
-    "Madi was banned, and there is no going back.",
+    "Example message1",
+    "Example message2",
   ],
   messageChannels: [],
   messageInterval: 3 * 60 * 60 * 1000, // 3 hours in milliseconds
