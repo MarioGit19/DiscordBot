@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const {
   Client,
   GatewayIntentBits,
@@ -23,9 +25,8 @@ const client = new Client({
   ],
 });
 
-// Your bot's token (replace with your bot's token)
-const token =
-  "MTM1NDM3NjQ1OTI1NDM3MDQ2OQ.GcJK4l.ANbaO3_sPbdN-X0mXfNWd2K3Zajd75Ff-I3dQM";
+// Instead, use this:
+const token = process.env.DISCORD_TOKEN;
 
 // Path to configuration file
 const CONFIG_PATH = path.join(__dirname, "config.json");
@@ -1331,6 +1332,239 @@ client.on("interactionCreate", async (interaction) => {
           ephemeral: true,
         });
         break;
+
+      case "guild":
+        const guildName = interaction.options.getString("name");
+        const filter = interaction.options.getString("filter") || "all";
+
+        // IMMEDIATELY defer the reply to prevent timeout
+        await interaction.deferReply();
+
+        try {
+          console.log(`Looking up guild: ${guildName}, filter: ${filter}`);
+
+          // Format the API URL with the guild name
+          const apiUrl = `https://armory.warmane.com/api/guild/${encodeURIComponent(
+            guildName
+          )}/Icecrown/summary`;
+
+          // Make the API request with timeout
+          const response = await axios.get(apiUrl, { timeout: 10000 });
+          const data = response.data;
+
+          if (!data || !data.name) {
+            await interaction.editReply({
+              content: `Guild "${guildName}" not found on Icecrown realm.`,
+            });
+            return;
+          }
+
+          // Filter members if needed
+          let filteredRoster = data.roster || [];
+          if (!filteredRoster || !Array.isArray(filteredRoster)) {
+            console.error("Invalid roster data:", filteredRoster);
+            filteredRoster = [];
+          }
+
+          if (filter === "online") {
+            filteredRoster = filteredRoster.filter(
+              (member) => member.online === true
+            );
+
+            if (filteredRoster.length === 0) {
+              await interaction.editReply({
+                content: `No online members found in guild "${data.name}" on Icecrown.`,
+              });
+              return;
+            }
+          }
+
+          // Store the filtered roster in a temporary collection for pagination
+          const guildData = {
+            guildInfo: {
+              name: data.name,
+              realm: data.realm,
+              faction: data.faction,
+              membercount: data.membercount || filteredRoster.length,
+              pvepoints: data.pvepoints,
+              leader: data.leader || {
+                name: "Unknown",
+                level: "??",
+                race: "Unknown",
+                class: "Unknown",
+              },
+            },
+            roster: filteredRoster,
+            page: 1,
+            filter: filter,
+            userId: interaction.user.id,
+          };
+
+          // Initialize guild lookup cache if needed
+          if (!client.guildLookupCache) {
+            client.guildLookupCache = new Map();
+          }
+
+          const cacheKey = `${interaction.user.id}-${Date.now()}`;
+          client.guildLookupCache.set(cacheKey, guildData);
+
+          // Create and send the first page
+          try {
+            const embedResponse = createGuildEmbed(guildData, cacheKey);
+            await interaction.editReply(embedResponse);
+          } catch (embedError) {
+            console.error("Error creating guild embed:", embedError);
+            await interaction.editReply({
+              content:
+                "Error formatting guild data. The guild might be too large to display properly.",
+            });
+          }
+        } catch (error) {
+          console.error("Error fetching guild data:", error);
+          await interaction.editReply({
+            content: `Failed to fetch data for guild "${guildName}". The API might be down or the guild doesn't exist.`,
+          });
+        }
+        break;
+
+      case "armory":
+        const characterName = interaction.options.getString("character");
+
+        // IMMEDIATELY defer the reply to prevent timeout
+        await interaction.deferReply();
+
+        try {
+          console.log(`Looking up character: ${characterName}`);
+
+          // Format the API URL with the character name
+          const apiUrl = `https://armory.warmane.com/api/character/${encodeURIComponent(
+            characterName
+          )}/Icecrown/summary`;
+
+          // Make the API request with timeout
+          const response = await axios.get(apiUrl, { timeout: 10000 });
+          const data = response.data;
+
+          if (!data || !data.name) {
+            await interaction.editReply({
+              content: `Character "${characterName}" not found on Icecrown realm.`,
+            });
+            return;
+          }
+
+          // Format the character data into a nice embed
+          const characterEmbed = {
+            color: data.faction === "Horde" ? 0xcc0000 : 0x0066cc, // Red for Horde, Blue for Alliance
+            title: `${data.name} - Level ${data.level} ${data.race} ${data.class}`,
+            url: `https://armory.warmane.com/character/${data.name}/Icecrown/summary`,
+            thumbnail: {
+              url: `https://armory.warmane.com/api/character/${data.name}/Icecrown/avatar`,
+            },
+            fields: [
+              {
+                name: "Basic Info",
+                value: `**Faction:** ${data.faction}\n**Guild:** ${
+                  data.guild || "None"
+                }\n**Achievement Points:** ${
+                  data.achievementpoints
+                }\n**Honorable Kills:** ${data.honorablekills}`,
+                inline: true,
+              },
+              {
+                name: "Professions",
+                value:
+                  data.professions && data.professions.length > 0
+                    ? data.professions
+                        .map((p) => `${p.name} (${p.skill})`)
+                        .join("\n")
+                    : "None",
+                inline: true,
+              },
+            ],
+            footer: {
+              text: `Online: ${data.online ? "Yes" : "No"}`,
+            },
+          };
+
+          // Add equipment section if available
+          if (data.equipment && data.equipment.length > 0) {
+            // Get notable equipment (weapons, trinkets)
+            const weapons = data.equipment.filter(
+              (item) =>
+                item.name.includes("sword") ||
+                item.name.includes("axe") ||
+                item.name.includes("mace") ||
+                item.name.includes("staff") ||
+                item.name.includes("bow") ||
+                item.name.includes("gun") ||
+                item.name.includes("dagger") ||
+                item.name.includes("wand")
+            );
+
+            if (weapons.length > 0) {
+              characterEmbed.fields.push({
+                name: "Weapons",
+                value:
+                  weapons
+                    .map((w) => w.name)
+                    .join("\n")
+                    .substring(0, 1020) || "None",
+                inline: true,
+              });
+            }
+
+            characterEmbed.fields.push({
+              name: "Equipment",
+              value: `[View Full Equipment](https://armory.warmane.com/character/${data.name}/Icecrown/summary)`,
+              inline: true,
+            });
+          }
+
+          // Add PVP section if available
+          if (data.pvpteams && data.pvpteams.length > 0) {
+            const pvpInfo = data.pvpteams
+              .map((team) => `**${team.type}**: ${team.name} (${team.rating})`)
+              .join("\n")
+              .substring(0, 1020);
+
+            characterEmbed.fields.push({
+              name: "PVP Teams",
+              value: pvpInfo || "None",
+              inline: false,
+            });
+          }
+
+          // Add talents section if available
+          if (data.talents && data.talents.length > 0) {
+            const talentInfo = data.talents
+              .map(
+                (spec, index) =>
+                  `**Spec ${index + 1}**: ${spec.tree} (${spec.points.join(
+                    "/"
+                  )})`
+              )
+              .join("\n")
+              .substring(0, 1020);
+
+            characterEmbed.fields.push({
+              name: "Talent Specs",
+              value: talentInfo || "None",
+              inline: false,
+            });
+          }
+
+          // Send the formatted response
+          await interaction.editReply({
+            content: `Character information for **${data.name}** on Icecrown:`,
+            embeds: [characterEmbed],
+          });
+        } catch (error) {
+          console.error("Error fetching character data:", error);
+          await interaction.editReply({
+            content: `Failed to fetch data for "${characterName}". The API might be down or the character doesn't exist.`,
+          });
+        }
+        break;
     }
   } catch (error) {
     console.error(`Error handling command ${commandName}:`, error);
@@ -1438,13 +1672,13 @@ function createGuildEmbed(guildData, cacheKey) {
   const { guildInfo, roster, page, filter } = guildData;
 
   // Calculate pagination
-  const membersPerPage = 15; // Reduced from 20 to avoid length issues
+  const membersPerPage = 10; // Further reduced to avoid any issues
   const startIndex = (page - 1) * membersPerPage;
   const endIndex = startIndex + membersPerPage;
   const currentPageMembers = roster.slice(startIndex, endIndex);
   const totalPages = Math.ceil(roster.length / membersPerPage);
 
-  // Create the guild embed
+  // Create a simpler guild embed to avoid Discord limits
   const guildEmbed = {
     color:
       guildInfo.faction === "Horde"
@@ -1458,55 +1692,40 @@ function createGuildEmbed(guildData, cacheKey) {
     )}/Icecrown/summary`,
     description: `**Faction:** ${guildInfo.faction}\n**Total Members:** ${
       guildInfo.membercount
-    }\n**PvE Points:** ${guildInfo.pvepoints || "0"}\n**Guild Leader:** ${
-      guildInfo.leader.name
-    } (${guildInfo.leader.level} ${guildInfo.leader.race} ${
-      guildInfo.leader.class
+    }\n**Guild Leader:** ${
+      guildInfo.leader?.name || "Unknown"
+    }\n\n**Showing Page ${page}/${totalPages || 1}** (${
+      filter === "online" ? "Online only" : "All members"
     })`,
     fields: [],
     footer: {
-      text: `Page ${page}/${totalPages} • ${
-        filter === "online" ? "Online members only" : "All members"
-      } • ${roster.length} ${filter === "online" ? "online " : ""}members`,
+      text: `${roster.length} ${
+        filter === "online" ? "online " : ""
+      }members • Use the buttons below to navigate`,
     },
   };
 
-  // Add member list to the embed - split into multiple fields to avoid hitting Discord's 1024 character limit
+  // Add member list in a more compact format
   if (currentPageMembers.length > 0) {
-    // Add a header field
-    guildEmbed.fields.push({
-      name: `Members (${startIndex + 1}-${Math.min(
-        endIndex,
-        roster.length
-      )} of ${roster.length})`,
-      value: `Below are the guild members for this page:`,
-    });
+    // Create chunks of 5 members per field to stay within limits
+    let memberChunks = [];
+    for (let i = 0; i < currentPageMembers.length; i += 5) {
+      memberChunks.push(currentPageMembers.slice(i, i + 5));
+    }
 
-    // Process each member individually to avoid exceeding field limits
-    currentPageMembers.forEach((member, index) => {
-      const onlineStatus = member.online ? "🟢" : "⚪";
-      let memberInfo = `${onlineStatus} **${member.name}** - ${member.level} ${member.race} ${member.class}`;
+    memberChunks.forEach((chunk, chunkIndex) => {
+      let memberList = "";
 
-      // Add profession info if available, but keep it brief
-      if (
-        member.professions &&
-        member.professions.professions &&
-        member.professions.professions.length > 0
-      ) {
-        const profs = member.professions.professions
-          .map((p) => `${p.name} (${p.skill})`)
-          .join(", ");
-        // Only add professions if they won't make the field too long
-        if (memberInfo.length + profs.length + 4 < 1000) {
-          memberInfo += `\n*Professions:* ${profs}`;
-        }
-      }
+      chunk.forEach((member) => {
+        const onlineStatus = member.online ? "🟢" : "⚪";
+        memberList += `${onlineStatus} **${member.name}** - ${member.level} ${member.race} ${member.class}\n`;
+      });
 
-      // Add this member as a new field with short name
       guildEmbed.fields.push({
-        name: `Member ${startIndex + index + 1}`,
-        value: memberInfo,
-        inline: true,
+        name: `Members ${startIndex + chunkIndex * 5 + 1}-${
+          startIndex + chunkIndex * 5 + chunk.length
+        }`,
+        value: memberList,
       });
     });
   } else {
