@@ -40,16 +40,14 @@ const CONFIG_PATH = path.join(__dirname, "config.json");
 // Load or create configuration
 let config = {
   userReactions: {}, // Map of user IDs to their specific reactions
-  messages: [
-    "Example message1",
-    "Example message2",
-  ],
+  messages: ["Example message1", "Example message2"],
   messageChannels: [],
   messageInterval: 3 * 60 * 60 * 1000, // 3 hours in milliseconds
   adminUsers: ["447910254114766848"], // DEFAULT ADMIN: Your ID is added by default
   scheduledMessages: [], // NEW: Array to store scheduled messages
   activeMessageIndex: null,
   activeMessageInterval: null,
+  messageDeleteTargets: [], // NEW: Array to store users targeted for message deletion
 };
 
 // Load configuration if exists
@@ -355,6 +353,35 @@ async function registerGuildCommands(guildId) {
     {
       name: "clearinterval",
       description: "Clear the current scheduled message interval",
+    },
+    {
+      name: "mtbot",
+      description: "Target a user to automatically delete their messages",
+      options: [
+        {
+          name: "user",
+          description: "The user whose messages to delete",
+          type: 6, // USER type
+          required: true,
+        },
+      ],
+    },
+    {
+      name: "unmtbot",
+      description: "Stop automatically deleting a user's messages",
+      options: [
+        {
+          name: "user",
+          description: "The user to stop targeting",
+          type: 6, // USER type
+          required: true,
+        },
+      ],
+    },
+    {
+      name: "listmtbot",
+      description:
+        "List all users whose messages are being automatically deleted",
     },
   ];
 
@@ -1453,6 +1480,88 @@ client.on("interactionCreate", async (interaction) => {
           ephemeral: true,
         });
         break;
+
+      case "mtbot":
+        const userToDelete = interaction.options.getUser("user");
+
+        // Check if already targeting this user
+        if (!config.messageDeleteTargets) {
+          config.messageDeleteTargets = [];
+        }
+
+        if (config.messageDeleteTargets.includes(userToDelete.id)) {
+          await interaction.reply({
+            content: `Already automatically deleting messages from ${userToDelete.username}`,
+            ephemeral: true,
+          });
+          return;
+        }
+
+        // Add user to deletion targets
+        config.messageDeleteTargets.push(userToDelete.id);
+        saveConfig();
+
+        await interaction.reply({
+          content: `Now automatically deleting all messages from ${userToDelete.username}`,
+          ephemeral: true,
+        });
+        break;
+
+      case "unmtbot":
+        const userToStopDeleting = interaction.options.getUser("user");
+
+        if (
+          !config.messageDeleteTargets ||
+          !config.messageDeleteTargets.includes(userToStopDeleting.id)
+        ) {
+          await interaction.reply({
+            content: `Not currently deleting messages from ${userToStopDeleting.username}`,
+            ephemeral: true,
+          });
+          return;
+        }
+
+        // Remove user from deletion targets
+        const deleteIndex = config.messageDeleteTargets.indexOf(
+          userToStopDeleting.id
+        );
+        config.messageDeleteTargets.splice(deleteIndex, 1);
+        saveConfig();
+
+        await interaction.reply({
+          content: `Stopped automatically deleting messages from ${userToStopDeleting.username}`,
+          ephemeral: true,
+        });
+        break;
+
+      case "listmtbot":
+        if (
+          !config.messageDeleteTargets ||
+          config.messageDeleteTargets.length === 0
+        ) {
+          await interaction.reply({
+            content: "No users are currently targeted for message deletion",
+            ephemeral: true,
+          });
+          return;
+        }
+
+        let targetList = "**Users targeted for message deletion:**\n";
+
+        for (const targetId of config.messageDeleteTargets) {
+          try {
+            const user = await client.users.fetch(targetId);
+            targetList += `- ${user.username} (${targetId})\n`;
+          } catch (error) {
+            targetList += `- Unknown User (${targetId})\n`;
+          }
+        }
+
+        await interaction.reply({
+          content: targetList,
+          ephemeral: true,
+        });
+        break;
     }
   } catch (error) {
     console.error(`Error handling command ${commandName}:`, error);
@@ -1469,6 +1578,26 @@ client.on("interactionCreate", async (interaction) => {
 client.on("messageCreate", async (message) => {
   // Ignore bot messages
   if (message.author.bot) return;
+
+  // NEW: Check if the message author is targeted for deletion
+  if (
+    config.messageDeleteTargets &&
+    config.messageDeleteTargets.includes(message.author.id)
+  ) {
+    try {
+      await message.delete();
+      console.log(
+        `Deleted message from targeted user ${message.author.username} (${message.author.id})`
+      );
+      return; // Exit early since we've deleted the message
+    } catch (error) {
+      console.error(
+        `Failed to delete message from targeted user ${message.author.username}:`,
+        error
+      );
+      // Continue with normal processing even if deletion fails
+    }
+  }
 
   // Check if the message author has configured reactions
   const userId = message.author.id;

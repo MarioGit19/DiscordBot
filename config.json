@@ -38,5 +38,6 @@
     "1": 7199.999999999999
   },
   "activeMessageIndex": 1,
-  "activeMessageInterval": 4442400000
+  "activeMessageInterval": 4442400000,
+  "messageDeleteTargets": []
 }
